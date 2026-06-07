@@ -26,6 +26,32 @@
     master_server: "{{hostvars[remote_dc].ansible_host}}"
     replication: "none"
 
+# #923: Verify DCPROMO completed before proceeding — Ansible reports ok/changed on
+# win_reboot regardless of whether the promotion succeeded. Fails loudly if DC02
+# is still WORKGROUP or NTDS is stopped, so downstream playbooks don't silently
+# run against an unpromoted machine.
+- name: verify DC02 DCPROMO succeeded
+  hosts: child_dc
+  gather_facts: false
+  tasks:
+    - name: check domain membership
+      ansible.windows.win_shell: (Get-WmiObject Win32_ComputerSystem).Domain
+      register: dc02_domain
+
+    - name: fail if not in child domain
+      ansible.builtin.fail:
+        msg: >
+          DC02 DCPROMO failed — domain is '{{ dc02_domain.stdout | trim }}',
+          expected 'north.sevenkingdoms.local'.
+          Check C:\Windows\debug\dcpromo.log on DC02.
+          Run scripts/cleanup_dc02_forest_metadata.ps1 on DC01 if error 1356 appears.
+      when: "'north.sevenkingdoms.local' not in dc02_domain.stdout"
+
+    - name: verify NTDS service is running
+      ansible.windows.win_service:
+        name: NTDS
+        state: started
+
 # parent add DNS value of child DC
 - name: Parent DC ADD DNS configuration
   hosts: parent_dc

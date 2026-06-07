@@ -1,0 +1,39 @@
+---
+# Pre-flight forest cleanup for DC02 rebuild (#922)
+#
+# Run this playbook on DC01 BEFORE rebuilding/reprovisioning DC02.
+# Removes stale WINTERFELL server objects and north.sevenkingdoms.local
+# partitions from DC01's forest so DCPROMO on a fresh DC02 can succeed.
+#
+# Usage:
+#   ansible-playbook -i ad/GOAD-Light/data/inventory cleanup_dc02.yml
+#
+# Safety: aborts if a live DC is still registered for north.sevenkingdoms.local.
+
+- name: pre-flight DC02 forest cleanup
+  hosts: dc01
+  gather_facts: false
+  tasks:
+    - name: copy cleanup script to DC01
+      ansible.windows.win_copy:
+        src: scripts/cleanup_dc02_forest_metadata.ps1
+        dest: C:\Windows\Temp\cleanup_dc02_forest_metadata.ps1
+
+    - name: run forest cleanup
+      ansible.windows.win_shell: |
+        powershell -ExecutionPolicy Bypass -File C:\Windows\Temp\cleanup_dc02_forest_metadata.ps1
+      register: cleanup_result
+
+    - name: show cleanup output
+      ansible.builtin.debug:
+        var: cleanup_result.stdout_lines
+
+    - name: fail if cleanup reported an error
+      ansible.builtin.fail:
+        msg: "Forest cleanup failed — see output above"
+      when: cleanup_result.rc != 0
+
+    - name: remove cleanup script
+      ansible.windows.win_file:
+        path: C:\Windows\Temp\cleanup_dc02_forest_metadata.ps1
+        state: absent
